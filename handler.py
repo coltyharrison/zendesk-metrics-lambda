@@ -1,11 +1,10 @@
 import base64
 import boto3
 import json
+import os
 
-from config import Config
 from botocore.vendored import requests
 
-cnf = Config()
 s3 = boto3.resource('s3')
 
 
@@ -17,32 +16,34 @@ class ZendeskConnector(object):
         self.rows = []
         self.organizations = {}
         self.users = {}
-        self.csv_fields = [
-            'date_created',
-            'ticket_id',
-            'assignee_name',
-            'ticket_subject',
-            'organization',
-            'type',
-            'trello_card',
-            'reason_code',
-            'product_area'
+        self.fields = [
+            'Date Created',
+            'Ticket ID',
+            'Assignee Name',
+            'Ticket Subject',
+            'Organization',
+            'Type',
+            'Trello Card',
+            'Reason Code',
+            'Product Area'
         ]
 
     def _get_headers(self):
-        return {'Authorization': 'Basic {}'.format(
-            base64.b64encode(cnf.ZENDESK_TOKEN).decode('utf-8'))}
+        return {
+            'Authorization': 'Basic {}'.format(base64.b64encode(
+                bytes(os.environ['ZENDESK_TOKEN'], 'utf-8')
+            ).decode('utf-8'))
+        }
 
     def _get_metrics_url(self):
         return '{}/api/v2/views/{}/execute.json'.format(
-            cnf.ZENDESK_URL, cnf.ZENDESK_VIEW)
+            os.environ['ZENDESK_URL'], os.environ['ZENDESK_VIEW'])
 
     def _get_request(self, url):
         r = requests.get(url, headers=self.headers)
         return r.json()
 
     def _update_metrics_data(self, response):
-        print(response)
         self.rows.extend(response['rows'])
         self.organizations.update(
             {org['id']: org['name'] for org in response['organizations']})
@@ -76,7 +77,10 @@ class ZendeskConnector(object):
                 row['custom_fields'][3]['name']\
                 if row['custom_fields'][3] else '',  # product area
             ])
-        return data_table
+        return {
+            "data": data_table,
+            "fields": self.fields
+        }
 
     def _prep_raw_data(self):
         return {'rows': self.rows,
@@ -85,7 +89,7 @@ class ZendeskConnector(object):
 
     def _write_to_s3(self, **kwargs):
         for k, v in kwargs.items():
-            s3.Bucket(cnf.S3_BUCKET_NAME).put_object(
+            s3.Bucket(os.environ['S3_BUCKET_NAME']).put_object(
                 Key='data/zendesk_{}.json'.format(k),
                 Body=json.dumps(v)
             )
